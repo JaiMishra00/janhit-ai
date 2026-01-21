@@ -37,19 +37,35 @@ parser = PydanticOutputParser(pydantic_object=DecomposedQuery)
 
 # Query decomposition prompt
 decomposition_prompt = ChatPromptTemplate.from_messages([
-    ("system", """
-You are a query decomposition agent.
-
-Rules:
-- Split the query into distinct semantic topics
-- Rewrite each topic as a standalone question
-- One topic per question
-- No overlap
-- Do not add new information
-- Output ONLY valid JSON
-"""),
-    ("human", "Query:\n{query}")
+    ("system",
+     "You are a query decomposition agent.\n"
+     "Return ONLY valid JSON. No text, no markdown.\n\n"
+     "Rules:\n"
+     "- Split the query into independent semantic topics\n"
+     "- Rewrite each topic as a standalone question\n"
+     "- One topic per question\n"
+     "- No overlap\n"
+     "- Do not add or infer information\n"
+     "- Use original terminology\n"
+     "- If only one topic, return one question\n\n"
+     "Output schema (STRICT):\n"
+     "{{\n"
+     '  "topics": [\n'
+     '    {{"question": "<standalone question>"}}\n'
+     "  ]\n"
+     "}}"
+    ),
+    ("human", "{query}")
 ])
+
+# TEMP DEBUG — REMOVE AFTER TESTING
+if __name__ == "__main__":
+    print(
+        (decomposition_prompt | llm).invoke(
+            {"query": "Who is an agriculturist according to GST acts"}
+        ).content
+    )
+
 
 
 def decompose_query(state: GraphState) -> GraphState:
@@ -65,8 +81,13 @@ def decompose_query(state: GraphState) -> GraphState:
     Returns:
         Updated state with standalone questions
     """
+
+    print(type(state))
+
     chain = decomposition_prompt | llm | parser
     result = chain.invoke({"query": state["query"]})
+
+    print("DECOMPOSE QUERY NODE HIT")
     
     return {
         **state,
@@ -87,6 +108,9 @@ def chunk_documents(state: GraphState) -> GraphState:
     Returns:
         Updated state with document chunks
     """
+
+    print(type(state))
+
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=CHUNK_SIZE,
         chunk_overlap=CHUNK_OVERLAP,
@@ -131,6 +155,9 @@ def embed_queries(state: GraphState) -> GraphState:
     Returns:
         Updated state with query embeddings
     """
+
+    print(type(state))
+
     if not state.get("standalone_questions"):
         return {
             **state,
@@ -160,6 +187,9 @@ def embed_documents(state: GraphState) -> GraphState:
     Returns:
         Updated state with chunk embeddings
     """
+
+    print(type(state))
+
     if not state.get("chunks"):
         return {
             **state,

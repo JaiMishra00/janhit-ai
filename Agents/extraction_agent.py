@@ -101,9 +101,13 @@ def route_extraction(state: GraphState) -> str:
     Returns:
         "extract" if files are present, "skip" otherwise
     """
+
+    print(type(state))
+
     if state.get("files"):
         return "extract"
     return "skip"
+
 
 
 def skip_extraction(state: GraphState) -> GraphState:
@@ -113,6 +117,9 @@ def skip_extraction(state: GraphState) -> GraphState:
     Returns:
         State with empty documents list
     """
+
+    print(type(state))
+
     return {
         **state,
         "documents": []
