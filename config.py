@@ -12,6 +12,7 @@ EMBEDDING_MODEL = "text-embedding-bge-m3"
 # ========== QDRANT ==========
 QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
 QDRANT_COLLECTION = "md_bge_m3_source"
+MEMORY_COLLECTION = "conversation_memory"
 
 # ========== TESSERACT ==========
 # Set this path if Tesseract is not in system PATH

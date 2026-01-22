@@ -7,6 +7,11 @@ from graph import app
 from Agents.generation_agent import format_response_with_metadata
 from pprint import pprint
 import sys
+import uuid
+
+# One session per CLI run
+SESSION_ID = str(uuid.uuid4())
+print(f"\n[Session Started] session_id = {SESSION_ID}\n")
 
 
 
@@ -31,9 +36,11 @@ def run_query(query: str, files: list = None):
     
     # Invoke the graph with dict (LangGraph expects dict, not TypedDict instance)
     initial_state = {
-        "query": query,
-        "files": files
-    }
+    "query": query,
+    "files": files,
+    "session_id": SESSION_ID   # THIS IS STEP 3
+}
+
 
     result = app.invoke(initial_state)
     
@@ -101,20 +108,20 @@ def main():
     print("\nEXAMPLE 1: Text-only query (no files)\n")
     run_query(
         query="I want to whistleblow important data of company, am I in danger?",
-        files=None
+        files="C:\Users\HP\Convolve\miniature-succotash\sample.pdf"
     )
     
     # Example 2: Query with document files
-    print("\nEXAMPLE 2: Query with PDF files\n")
-    run_query(
-        query="What is this document? How to fill it?",
-        files=["sample.pdf", "scan.jpg"]  # Replace with actual paths
-    )
+    # print("\nEXAMPLE 2: Query with PDF files\n")
+    # run_query(
+    #     query="What is this document? How to fill it?",
+    #     files=["sample.pdf", "scan.jpg"]  # Replace with actual paths
+    # )
     
     # Example 3: Domain-specific query with filters
     print("\nEXAMPLE 3: Domain-specific query\n")
     run_query(
-        query="how to lodge a FIR complain?",
+        query="how do I fill this document?",
         files=["sample.pdf"]
     )
 

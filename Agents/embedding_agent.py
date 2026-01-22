@@ -69,30 +69,28 @@ if __name__ == "__main__":
 
 
 def decompose_query(state: GraphState) -> GraphState:
-    """
-    Decompose user query into standalone questions.
-    
-    State inputs:
-        - query: User's original question
-        
-    State outputs:
-        - standalone_questions: List of decomposed questions
-        
-    Returns:
-        Updated state with standalone questions
-    """
-
     print(type(state))
 
-    chain = decomposition_prompt | llm | parser
-    result = chain.invoke({"query": state["query"]})
+    raw = (decomposition_prompt | llm).invoke(
+        {"query": state["query"]}
+    ).content
+
+    try:
+        result = parser.parse(raw)
+        questions = [t.question for t in result.topics]
+        if not questions:
+            raise ValueError("Empty topics")
+    except Exception:
+        print("[DECOMPOSE] Conversational query detected, using fallback")
+        questions = [state["query"]]
 
     print("DECOMPOSE QUERY NODE HIT")
-    
+
     return {
         **state,
-        "standalone_questions": [t.question for t in result.topics]
+        "standalone_questions": questions
     }
+
 
 
 def chunk_documents(state: GraphState) -> GraphState:
@@ -203,3 +201,10 @@ def embed_documents(state: GraphState) -> GraphState:
         **state,
         "chunk_embeddings": embeddings
     }
+
+# ---- Memory-compatible embedder alias ----
+class _MemoryEmbedder:
+    def embed_query(self, text: str):
+        return embedding_model.embed_documents([text])[0]
+
+embedder = _MemoryEmbedder()

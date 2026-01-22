@@ -1,4 +1,4 @@
-from typing import List, Dict, Optional, TypedDict
+from typing import List, Dict, Optional, TypedDict, Any
 
 
 class GraphState(TypedDict, total=False):
@@ -27,3 +27,17 @@ class GraphState(TypedDict, total=False):
     context: str
     citations: List[Dict]
     final_response: str
+
+    # Legacy fields (if still used elsewhere)
+    user_query: str
+    retrieved_docs: List[dict]
+    final_answer: str
+
+    # ========== CONVERSATIONAL MEMORY ==========
+    session_id: str
+    relevant_memory: List[str]
+    
+    # ========== RUNTIME DEPENDENCIES ==========
+    # These are passed at runtime and not persisted
+    embedder: Any  # The embedding model instance
+    qdrant_client: Any  # The Qdrant client instance

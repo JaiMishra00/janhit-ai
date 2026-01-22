@@ -38,6 +38,11 @@ from Agents.generation_agent import (
 from Agents.indexing_agent import index_documents
 from Agents.identify_document_agent import identify_document
 
+from Agents.embedding_agent import embedder
+from qdrant_client import QdrantClient
+from config import QDRANT_URL
+
+qdrant_client = QdrantClient(url=QDRANT_URL)
 
 def create_graph():
     """
@@ -150,9 +155,14 @@ if __name__ == "__main__":
     print("=" * 60)
     
     result = app.invoke({
-        "query": "Explain CRISPR, its ethical concerns, and its use in cancer treatment.",
-        "files": None
+    "query": "Explain CRISPR...",
+    "files": None,
+
+    # REQUIRED FOR MEMORY + RETRIEVAL
+    "embedder": embedder,
+    "qdrant_client": qdrant_client
     })
+
     
     print(f"Standalone questions: {len(result.get('standalone_questions', []))}")
     print(f"Documents: {len(result.get('documents', []))}")

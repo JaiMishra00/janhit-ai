@@ -1,23 +1,32 @@
 """
-Pydantic models for structured LLM outputs.
+Pydantic schemas for structured outputs.
 """
 
-from typing import List, Dict, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from typing import List, Optional, Dict, Any
 
 
 class Topic(BaseModel):
-    """Single decomposed query topic."""
-    question: str
+    """Single decomposed topic/question."""
+    question: str = Field(description="Standalone question for this topic")
 
 
 class DecomposedQuery(BaseModel):
-    """Output of query decomposition."""
-    topics: List[Topic]
+    """Result of query decomposition."""
+    topics: List[Topic] = Field(description="List of standalone questions")
 
 
-class RetrieverFilter(BaseModel):
-    """Filters for vector search with Qdrant."""
-    doc_type: Optional[str] = None
-    category: Optional[str] = None
-    jurisdiction: Optional[str] = None
+class FilterSchema(BaseModel):
+    """Metadata filters for retrieval."""
+    filters: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Metadata filters to apply during retrieval"
+    )
+    
+    class Config:
+        # Allow arbitrary field names in filters dict
+        extra = "allow"
+
+
+# Alias for backward compatibility
+RetrieverFilter = FilterSchema
