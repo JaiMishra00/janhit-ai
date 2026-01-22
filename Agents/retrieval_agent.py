@@ -71,7 +71,7 @@ def generate_filters(state: GraphState) -> GraphState:
         Updated state with retrieval filters
     """
 
-    print(type(state))
+    print(f"[FILTERS] Generating filters for query: {state['query']}")
 
     chain = filter_prompt | llm | filter_parser
     result = chain.invoke({"query": state["query"]})
@@ -81,12 +81,16 @@ def generate_filters(state: GraphState) -> GraphState:
         if v is not None
     }
     
+    filters = {
+        "must": must,
+        "top_k": DEFAULT_TOP_K
+    }
+    
+    print(f"[FILTERS] Generated filters: {filters}")
+    
     return {
         **state,
-        "filters": {
-            "must": must,
-            "top_k": DEFAULT_TOP_K
-        }
+        "filters": filters
     }
 
 
@@ -105,12 +109,17 @@ def retrieve_and_rank(state: GraphState) -> GraphState:
         Updated state with retrieved matches
     """
 
-    print(type(state))
+    
+
+
+    print(f"[RETRIEVAL] Starting retrieval with {len(state.get('query_embeddings', []))} query embeddings")
 
     results = []
+    assert all(isinstance(m, dict) for m in results), "Non-dict match leaked"
     
     # If no query embeddings, return empty matches
     if not state.get("query_embeddings"):
+        print("[RETRIEVAL] No query embeddings found")
         return {
             **state,
             "matches": []
@@ -130,61 +139,83 @@ def retrieve_and_rank(state: GraphState) -> GraphState:
                 for k, v in filters["must"].items()
             ]
         )
+        print(f"[RETRIEVAL] Using filters: {filters['must']}")
+    else:
+        print("[RETRIEVAL] No filters applied")
     
     # Get top_k from filters or use default
     top_k = filters.get("top_k", DEFAULT_TOP_K)
     
     # Search for each query embedding
-    for q_emb in state["query_embeddings"]:
+    for idx, q_emb in enumerate(state["query_embeddings"]):
+        print(f"[RETRIEVAL] Searching with embedding {idx + 1}/{len(state['query_embeddings'])}")
+        
         try:
             res = qdrant.query_points(
-                QDRANT_COLLECTION,
-                q_emb,
+                collection_name=QDRANT_COLLECTION,
+                query=q_emb,
                 limit=top_k,
-                with_payload=True
+                with_payload=True,
+                query_filter=search_filter
             )
 
+            print(f"[RETRIEVAL] Response type: {type(res)}")
+            
             # Version-safe handling
             if isinstance(res, tuple):
-                hits = res[0]          # (points, next_page)
+                hits = res[0]  # (points, next_page)
+                print(f"[RETRIEVAL] Got tuple response with {len(hits)} hits")
             else:
-                hits = res             # points only
+                hits = res  # points only
+                print(f"[RETRIEVAL] Got direct response with {len(hits) if hasattr(hits, '__len__') else 'unknown'} hits")
             
-            for h in hits:
-
-    # Handle tuple-based hits safely
+            for h_idx, h in enumerate(hits):
+                print(f"[RETRIEVAL] Processing hit {h_idx + 1}, type: {type(h)}")
+                
+                # Handle different response formats
                 if isinstance(h, tuple):
+                    # Tuple format: (point_id, score, payload) or (point_id, payload)
                     if len(h) == 3:
                         point_id, score, payload = h
                     elif len(h) == 2:
                         point_id, payload = h
                         score = 0.0
-
                     else:
+                        print(f"[RETRIEVAL] Unexpected tuple length: {len(h)}")
                         continue
                 else:
-                    # Newer client object style
+                    # Object format (ScoredPoint)
                     point_id = h.id
-                    score = h.score
+                    score = getattr(h, 'score', 0.0)
                     payload = h.payload
 
+                print(f"[RETRIEVAL] Hit {h_idx + 1} - ID: {point_id}, Score: {score}, Payload type: {type(payload)}")
+
+                # CRITICAL FIX: Ensure payload is a dict, not wrapped in a list
+                if isinstance(payload, list) and len(payload) > 0:
+                    print(f"[RETRIEVAL] WARNING: Payload is a list, extracting first element")
+                    payload = payload[0]
+
                 results.append({
-                    "id": point_id,
-                    "score": score,
-                    "payload": payload
+                    "id": str(point_id),
+                    "score": float(score) if score is not None else 0.0,
+                    "payload": payload  # Now guaranteed to be a dict
                 })
 
         except Exception as e:
-            print(f"Error searching Qdrant: {e}")
+            print(f"[RETRIEVAL] Error searching Qdrant: {e}")
+            import traceback
+            traceback.print_exc()
             continue
     
     # Global ranking by score
     results = sorted(
-    results,
-    key=lambda x: x["score"] if x["score"] is not None else -1,
-    reverse=True
-)
-
+        results,
+        key=lambda x: x["score"] if x["score"] is not None else -1,
+        reverse=True
+    )
+    
+    print(f"[RETRIEVAL] Total results before deduplication: {len(results)}")
     
     # Deduplicate by ID (keep highest score)
     seen_ids = set()
@@ -194,7 +225,22 @@ def retrieve_and_rank(state: GraphState) -> GraphState:
             unique_results.append(r)
             seen_ids.add(r["id"])
     
+    final_matches = unique_results[:top_k]
+    
+    print(f"[RETRIEVAL] Final matches: {len(final_matches)}")
+    for i, match in enumerate(final_matches[:3]):  # Show first 3
+        if isinstance(match, dict):
+            score = match["score"]
+            payload = match["payload"]
+        else:  # ScoredPoint
+            score = match.score
+            payload = match.payload
+
+        doc_id = payload.get("doc_id", "N/A") if isinstance(payload, dict) else "N/A"
+
+        print(f"[RETRIEVAL]   Match {i+1}: score={score:.4f}, doc_id={doc_id}")
+    
     return {
         **state,
-        "matches": unique_results[:top_k]  # Limit to top_k globally
+        "matches": final_matches
     }

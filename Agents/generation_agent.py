@@ -90,22 +90,33 @@ def prepare_context(matches: List[Dict]) -> tuple[str, List[Dict]]:
     
     for idx, match in enumerate(matches, 1):
         print(f"[CONTEXT] Match {idx} type: {type(match)}")
-        print(f"[CONTEXT] Match {idx} keys: {match.keys() if isinstance(match, dict) else 'N/A'}")
         
-        # Normalize match structure - handle dict format from retrieval_agent
+        # Extract from dict format (from retrieval_agent)
         if isinstance(match, dict):
             payload = match.get("payload", {})
             score = match.get("score", 0.0)
+            
             print(f"[CONTEXT] Dict match - payload type: {type(payload)}")
+            
+            # CRITICAL: Handle case where payload might still be a list
+            if isinstance(payload, list):
+                print(f"[CONTEXT] WARNING: Payload is list with {len(payload)} items")
+                if len(payload) > 0:
+                    payload = payload[0]
+                    print(f"[CONTEXT] Extracted first item, new type: {type(payload)}")
+                else:
+                    print(f"[CONTEXT] Empty payload list, skipping")
+                    continue
+                    
         elif hasattr(match, "payload"):  # ScoredPoint object
             payload = match.payload
             score = match.score
-            print(f"[CONTEXT] Object match - payload: {payload}")
+            print(f"[CONTEXT] Object match - payload: {type(payload)}")
         else:
             print(f"[CONTEXT] Unknown match format, skipping")
             continue
 
-        # Extract text from payload
+        # Extract text from payload (now guaranteed to be dict or object)
         text = ""
         doc_id = "Unknown"
         chunk_id = 0
@@ -114,21 +125,19 @@ def prepare_context(matches: List[Dict]) -> tuple[str, List[Dict]]:
             text = payload.get("text", "")
             doc_id = payload.get("doc_id", "Unknown")
             chunk_id = payload.get("chunk_id", 0)
-        elif hasattr(payload, "get"):
-            text = payload.get("text", "")
-            doc_id = payload.get("doc_id", "Unknown")
-            chunk_id = payload.get("chunk_id", 0)
-        elif hasattr(payload, "text"):
-            text = payload.text
+            print(f"[CONTEXT] Dict payload - doc_id: {doc_id}, chunk_id: {chunk_id}, text_len: {len(text)}")
+        elif hasattr(payload, "__dict__"):
+            # Object with attributes
+            text = getattr(payload, "text", "")
             doc_id = getattr(payload, "doc_id", "Unknown")
             chunk_id = getattr(payload, "chunk_id", 0)
+            print(f"[CONTEXT] Object payload - doc_id: {doc_id}, chunk_id: {chunk_id}, text_len: {len(text)}")
         else:
-            print(f"[CONTEXT] Cannot extract text from payload type: {type(payload)}")
+            print(f"[CONTEXT] Cannot extract from payload type: {type(payload)}")
+            print(f"[CONTEXT] Payload content: {payload}")
             continue
 
-        print(f"[CONTEXT] Extracted - doc_id: {doc_id}, chunk_id: {chunk_id}, text_len: {len(text)}")
-
-        if text:
+        if text and len(text.strip()) > 0:
             context_parts.append(f"[Source {idx}]\n{text}\n")
             
             citations.append({
@@ -138,11 +147,15 @@ def prepare_context(matches: List[Dict]) -> tuple[str, List[Dict]]:
                 "score": score if score is not None else 0.0,
                 "text_preview": text[:200]
             })
+            print(f"[CONTEXT] Added source {idx}: {doc_id}::{chunk_id}")
         else:
-            print(f"[CONTEXT] WARNING: Empty text for match {idx}")
+            print(f"[CONTEXT] Empty text for match {idx}, skipping")
     
     context_string = "\n".join(context_parts)
     print(f"[CONTEXT] Final context: {len(context_string)} chars, {len(citations)} citations")
+    
+    if len(citations) == 0:
+        print("[CONTEXT] WARNING: No citations generated! Check payload structure.")
     
     return context_string, citations
 
