@@ -98,11 +98,11 @@ def main():
     """Main execution function."""
     
     # Example 1: Text-only query
-    # print("\nEXAMPLE 1: Text-only query (no files)\n")
-    # run_query(
-    #     query="what is an agriculturist in gst act?",
-    #     files=None
-    # )
+    print("\nEXAMPLE 1: Text-only query (no files)\n")
+    run_query(
+        query="I want to whistleblow important data of company, am I in danger?",
+        files=None
+    )
     
     # Example 2: Query with document files
     print("\nEXAMPLE 2: Query with PDF files\n")
@@ -112,11 +112,11 @@ def main():
     )
     
     # Example 3: Domain-specific query with filters
-    # print("\nEXAMPLE 3: Domain-specific query\n")
-    # run_query(
-    #     query="how to lodge a FIR complain?",
-    #     files=None
-    # )
+    print("\nEXAMPLE 3: Domain-specific query\n")
+    run_query(
+        query="how to lodge a FIR complain?",
+        files=["sample.pdf"]
+    )
 
 
 if __name__ == "__main__":

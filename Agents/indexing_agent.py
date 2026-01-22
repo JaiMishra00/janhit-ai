@@ -83,12 +83,13 @@ def index_documents(state: GraphState) -> GraphState:
             id=point_id,
             vector=embedding,
             payload={
-                "doc_id": doc_id,
-                "chunk_id": chunk_id,
-                "text": text,
-                # Add original identifier for reference
-                "original_id": f"{doc_id}::{chunk_id}"
-            }
+            "doc_id": doc_id,
+            "chunk_id": chunk_id,
+            "text": text,
+            "doc_type": state.get("document_profile", {}).get("doc_type"),
+            "category": state.get("document_profile", {}).get("category"),
+            "jurisdiction": state.get("document_profile", {}).get("jurisdiction"),
+}
         )
         
         points.append(point)

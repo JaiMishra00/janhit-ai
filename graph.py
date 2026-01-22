@@ -36,6 +36,7 @@ from Agents.generation_agent import (
     format_response_with_metadata
 )
 from Agents.indexing_agent import index_documents
+from Agents.identify_document_agent import identify_document
 
 
 def create_graph():
@@ -70,6 +71,8 @@ def create_graph():
     # Indexing node
     graph.add_node("index_documents", index_documents)
 
+    graph.add_node("identify_document", identify_document)
+
     
     # ========== CONFIGURE ROUTING ==========
     
@@ -87,8 +90,10 @@ def create_graph():
     )
     
     # Both extraction paths converge to decompose_query
-    graph.add_edge("extract_documents", "decompose_query")
-    graph.add_edge("skip_extraction", "decompose_query")
+    # graph.add_edge("extract_documents", "decompose_query")
+    # graph.add_edge("skip_extraction", "decompose_query")
+    graph.add_node("noop", lambda state: state)
+
     
     # ========== LINEAR PIPELINE ==========
     
@@ -111,6 +116,15 @@ def create_graph():
     
     # Retrieval → Response generation
     graph.add_edge("retrieve_and_rank", "generate_response")
+
+    # extraction of document
+    graph.add_edge("extract_documents", "identify_document")
+    graph.add_edge("identify_document", "decompose_query")
+
+    graph.add_edge("skip_extraction", "noop")
+    graph.add_edge("noop", "decompose_query")
+
+
     
     # ========== EXIT POINT ==========
     
