@@ -1,0 +1,26 @@
+1. System Requirements
+    Python 3.9 or higher
+    Internet access
+    A Qdrant Cloud account
+    A hosted LLM & Embeddings API key (OpenAI-compatible) / Locally running compatible as well
+    (Optional) Tesseract OCR for scanned PDFs/images
+
+2. Clone the repo
+
+3. Create and activate venv
+
+4. install dependencies
+
+5. Set environment variables in config.py 
+
+6. Setup Qdrant collection (md_bge_m3_source and conversation_memory)
+
+7. OCR Setup (optional) 
+    Install Tesseract OCR
+    Set TESSERACT_CMD path in config.py if not in PATH
+
+8. Run the application
+    python cli.py
+
+9. Ask a question and press enter, type "exit" to exit
+
