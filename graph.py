@@ -115,8 +115,6 @@ def create_graph():
     # ========== EXIT POINT ==========
     
     graph.add_edge("generate_response", END)
-    compiled = graph.compile()
-    print(compiled.get_graph().draw_mermaid())
 
     
     # Compile graph

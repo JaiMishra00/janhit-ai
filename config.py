@@ -17,7 +17,12 @@ QDRANT_COLLECTION = "md_bge_m3_dense"
 # Set this path if Tesseract is not in system PATH
 TESSERACT_CMD = os.getenv(
     "TESSERACT_CMD",
-    r"C:\Program Files\Tesseract-OCR\tesseract.exe"  # Windows default
+    r'C:\\Program Files\\Tesseract-OCR\\tesseract.exe'  # Windows default
+)
+
+POPPLER_CMD = os.getenv(
+    "POPPLER_CMD"
+    r"C:\\Users\\HP\\poppler\\Library\\bin"
 )
 
 # ========== CHUNKING ==========
