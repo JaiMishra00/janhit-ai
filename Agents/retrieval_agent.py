@@ -1,282 +1,213 @@
 """
 Agent 3: Retrieval Agent
-Generates metadata filters and retrieves relevant chunks from Qdrant.
+Generates filters and retrieves relevant chunks from Qdrant.
 """
 
-from langchain_openai import ChatOpenAI
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import PydanticOutputParser
-from qdrant_client import QdrantClient, models
-from qdrant_client import models
+from typing import List
+from qdrant_client.models import Filter, FieldCondition, MatchAny
+
 from models.state import GraphState
-from models.schemas import RetrieverFilter
-from utils.memory_store import store_memory
-
-
 from config import (
-    LMSTUDIO_BASE_URL,
-    LMSTUDIO_MODEL,
-    QDRANT_URL,
     QDRANT_COLLECTION,
+    MEMORY_COLLECTION,
     DEFAULT_TOP_K
 )
 
-# Initialize LLM for filter generation
-llm = ChatOpenAI(
-    base_url=LMSTUDIO_BASE_URL,
-    api_key="not-needed",
-    model=LMSTUDIO_MODEL,
-    temperature=0.0
-)
-
-# Initialize Qdrant client
-qdrant = QdrantClient(url=QDRANT_URL)
-
-# Filter generation parser
-filter_parser = PydanticOutputParser(pydantic_object=RetrieverFilter)
-
-# Filter generation prompt
-filter_prompt = ChatPromptTemplate.from_messages([
-    ("system",
-    "You are a STRICT JSON generator.\n"
-     "Do NOT answer the question.\n"
-     "Do NOT explain.\n"
-     "Do NOT include assumptions.\n\n"
-     "Your task is to generate structured retrieval filters.\n\n"
-     "Output format (STRICT):\n"
-     "{{\n"
-     '  "filters": {{\n'
-     '    "doc_type": "<string or null>",\n'
-     '    "category": "<string or null>",\n'
-     '    "jurisdiction": "<string or null>"\n'
-     "  }}\n"
-     "}}\n\n"
-     "Rules:\n"
-     "- If a filter cannot be inferred directly from the query, set it to null\n"
-     "- Use terminology exactly as in the query\n"
-     "- Output ONLY valid JSON"
-    ),
-    ("human", "{query}")
-])
 
 def retrieve_conversation_memory(
     client,
     embedder,
     session_id: str,
-    current_query: str,
-    top_k: int = 4
-):
-    query_vec = embedder.embed_query(current_query)
+    query: str,
+    top_k: int = 3
+) -> List[str]:
+    """
+    Retrieve relevant past conversations for context continuity.
+    Uses semantic search on the conversation_memory collection.
+    """
+    try:
+        query_vector = embedder.embed_query(query)
 
-    hits = client.search(
-        collection_name="conversation_memory",
-        query_vector=query_vec,
-        limit=top_k,
-        query_filter=models.Filter(
-            must=[
-                models.FieldCondition(
-                    key="session_id",
-                    match=models.MatchValue(value=session_id)
-                )
-            ]
+        # Use query_points (new Qdrant API)
+        response = client.query_points(
+            collection_name=MEMORY_COLLECTION,
+            query=query_vector,
+            limit=top_k,
+            with_payload=True
         )
-    )
 
-    return [hit.payload["text"] for hit in hits]
+        memories = []
+        for point in response.points:
+            payload = point.payload or {}
+            # Filter by session
+            if payload.get("session_id") == session_id:
+                text = payload.get("text", "")
+                role = payload.get("role", "unknown")
+                if text:
+                    memories.append(f"[{role}] {text}")
 
-def build_retrieval_query(user_query: str, memory_chunks: list[str]):
-    if not memory_chunks:
-        return user_query
-
-    memory_context = "\n".join(f"- {m}" for m in memory_chunks)
-
-    return f"""
-Previous conversation context:
-{memory_context}
-
-Current question:
-{user_query}
-"""
+        return memories
+    
+    except Exception as e:
+        print(f"[MEMORY] Error retrieving conversation memory: {e}")
+        return []
 
 
 def generate_filters(state: GraphState) -> GraphState:
     """
-    Generate Qdrant filters using identified document context.
+    Generate metadata filters based on query.
+    
+    State inputs:
+        - query: User's question
+        - documents: Extracted documents (for deriving filters)
+        
+    State outputs:
+        - filters: Dictionary of metadata filters
+        
+    Returns:
+        Updated state with filters
     """
-
-    doc_profile = state.get("document_profile") or {}
-
-    must = {
-        "doc_type": doc_profile.get("doc_type"),
-        "category": doc_profile.get("category"),
-        "jurisdiction": doc_profile.get("jurisdiction"),
-    }
-
-    # Drop null / empty values
-    must = {k: v for k, v in must.items() if v}
-
+    
     filters = {
-        "must": must,
+        "must": {},
         "top_k": DEFAULT_TOP_K
     }
-
+    
+    # Extract document IDs from extracted documents (if any)
+    if state.get("documents"):
+        doc_ids = [doc["doc_id"] for doc in state["documents"]]
+        if doc_ids:
+            filters["must"]["doc_id"] = doc_ids
+    
     print(f"[FILTERS] Using document-derived filters: {filters}")
-
+    
     return {
         **state,
         "filters": filters
     }
 
 
-
 def retrieve_and_rank(state: GraphState) -> GraphState:
+    """
+    Retrieve and rank relevant chunks using query embeddings.
     
+    State inputs:
+        - query_embeddings: List of query vectors
+        - filters: Metadata filters
+        - embedder: Embedding model (passed at runtime)
+        - qdrant_client: Qdrant client (passed at runtime)
+        - session_id: Current conversation session
+        
+    State outputs:
+        - matches: List of retrieved chunks with scores
+        - relevant_memory: Retrieved conversation history
+        
+    Returns:
+        Updated state with retrieval results
     """
-    Retrieve and rank chunks from Qdrant vector store.
-    Compatible with Qdrant returning QueryResponse(points=[...]).
-    """
-
+    
     query_embeddings = state.get("query_embeddings", [])
-    session_id = state.get("session_id")
-    user_query = state.get("query")
-
+    
     print(f"[RETRIEVAL] Starting retrieval with {len(query_embeddings)} query embeddings")
-
-    # ---- STEP 9A: Store USER query in conversational memory ----
-    if session_id and user_query:
-        store_memory(
-            client=qdrant,
-            embedder=state["embedder"],
-            session_id=session_id,
-            role="user",
-            text=user_query,
-            turn_id=state.get("turn_id", 0)
-        )
-
-
-    # ---- Retrieve conversational memory ----
-    relevant_memory = []
-    if session_id and user_query:
-        relevant_memory = retrieve_conversation_memory(
-            client=qdrant,
-            embedder=state["embedder"],  # ⚠️ see note below
-            session_id=session_id,
-            current_query=user_query,
-            top_k=4
-        )
-
-        print(f"[MEMORY] Retrieved {len(relevant_memory)} memory items")
-
-
+    
+    # Get runtime dependencies
+    embedder = state.get("embedder")
+    client = state.get("qdrant_client")
+    
+    if not embedder or not client:
+        print("[RETRIEVAL] ERROR: Missing embedder or qdrant_client")
+        return {
+            **state,
+            "matches": [],
+            "relevant_memory": []
+        }
+    
+    # Retrieve conversation memory
+    relevant_memory = retrieve_conversation_memory(
+        client=client,
+        embedder=embedder,
+        session_id=state.get("session_id", "default"),
+        query=state["query"],
+        top_k=3
+    )
+    
+    print(f"[RETRIEVAL] Retrieved {len(relevant_memory)} memory items")
+    
     if not query_embeddings:
         print("[RETRIEVAL] No query embeddings found")
-        return {**state, "matches": []}
-
-    results = []
-
-    # -------- Build filter --------
-    search_filter = None
-    filters = state.get("filters", {})
-
-    if filters.get("must"):
-        search_filter = models.Filter(
-            must=[
-                models.FieldCondition(
-                    key=k,
-                    match=models.MatchValue(value=v)
-                )
-                for k, v in filters["must"].items()
-            ]
-        )
-        print(f"[RETRIEVAL] Using filters: {filters['must']}")
-    else:
-        print("[RETRIEVAL] No filters applied")
-
-    top_k = filters.get("top_k", DEFAULT_TOP_K)
-
-    # -------- Retrieval --------
-    for idx, q_emb in enumerate(query_embeddings):
+        return {
+            **state,
+            "matches": [],
+            "relevant_memory": relevant_memory
+        }
+    
+    filters_dict = state.get("filters", {})
+    top_k = filters_dict.get("top_k", DEFAULT_TOP_K)
+    must_filters = filters_dict.get("must", {})
+    
+    all_matches = []
+    
+    # Retrieve for each query embedding
+    for idx, query_vector in enumerate(query_embeddings):
         print(f"[RETRIEVAL] Searching with embedding {idx + 1}/{len(query_embeddings)}")
-
-        # ---- Build memory-aware query ----
-        blended_query = build_retrieval_query(
-            user_query=user_query,
-            memory_chunks=relevant_memory
-        )
-
-        # ---- Re-embed blended query ----
-        q_emb = state["embedder"].embed_query(blended_query)
-
+        
+        # Build Qdrant filter
+        qdrant_filter = None
+        if must_filters:
+            conditions = []
+            for key, value in must_filters.items():
+                if isinstance(value, list):
+                    conditions.append(
+                        FieldCondition(key=key, match=MatchAny(any=value))
+                    )
+                else:
+                    conditions.append(
+                        FieldCondition(key=key, match=value)
+                    )
+            
+            if conditions:
+                qdrant_filter = Filter(must=conditions)
+        
+        # Use query_points (new Qdrant API)
         try:
-            res = qdrant.query_points(
+            response = client.query_points(
                 collection_name=QDRANT_COLLECTION,
-                query=q_emb,
+                query=query_vector,
                 limit=top_k,
-                with_payload=True,
-                query_filter=search_filter
+                query_filter=qdrant_filter,
+                with_payload=True
             )
-
-            # Qdrant >= 1.7 returns QueryResponse
-            points = res.points
-
-            print(f"[RETRIEVAL] Retrieved {len(points)} hits")
-
-            for h in points:
-                if not isinstance(h.payload, dict):
-                    continue
-
-                payload = h.payload
-
-                # 🔧 BACKWARD-COMPAT FIX
-                if "text" not in payload:
-                    payload["text"] = payload.get("original_text", "")
-
-                if "doc_id" not in payload:
-                    payload["doc_id"] = payload.get("source_file", "Unknown")
-
-                if not payload["text"]:
-                    continue
-
-                results.append({
-                    "id": str(h.id),
-                    "score": float(h.score),
-                    "payload": payload
+            
+            # Convert to standard format
+            for point in response.points:
+                all_matches.append({
+                    "id": point.id,
+                    "score": point.score,
+                    "payload": point.payload
                 })
-
+                
         except Exception as e:
-            print(f"[RETRIEVAL] Error searching Qdrant: {e}")
+            print(f"[RETRIEVAL] Error during search: {e}")
             import traceback
             traceback.print_exc()
-
-    # -------- Rank & Deduplicate --------
-    results = sorted(results, key=lambda x: x["score"], reverse=True)
-
-    seen = set()
-    unique = []
-    for r in results:
-        if r["id"] not in seen:
-            unique.append(r)
-            seen.add(r["id"])
-
-    final_matches = unique[:top_k]
-
-    print(f"[RETRIEVAL] Final matches: {len(final_matches)}")
-    for i, m in enumerate(final_matches[:3]):
-        print(
-            f"[RETRIEVAL]   Match {i+1}: "
-            f"score={m['score']:.4f}, "
-            f"doc_id={m['payload'].get('doc_id', 'N/A')}"
-        )
-
+            continue
+    
+    # Remove duplicates and sort by score
+    seen_ids = set()
+    unique_matches = []
+    
+    for match in sorted(all_matches, key=lambda x: x["score"], reverse=True):
+        if match["id"] not in seen_ids:
+            seen_ids.add(match["id"])
+            unique_matches.append(match)
+    
+    # Limit to top_k
+    final_matches = unique_matches[:top_k]
+    
+    print(f"[RETRIEVAL] Retrieved {len(final_matches)} unique matches")
+    
     return {
-    **state,
-    "matches": final_matches,
-    "relevant_memory": relevant_memory
-}
-
-
-
-    
-
-
-    
+        **state,
+        "matches": final_matches,
+        "relevant_memory": relevant_memory
+    }

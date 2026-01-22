@@ -21,7 +21,7 @@ llm = ChatOpenAI(
 )
 
 
-# ---------------- PROMPT (UNCHANGED) ----------------
+# ---------------- PROMPT ----------------
 
 generation_prompt = ChatPromptTemplate.from_messages([
     ("system", """
@@ -49,7 +49,7 @@ Provide a comprehensive answer based on the context above.
 ])
 
 
-# ---------------- CONTEXT BUILDER (FIXED) ----------------
+# ---------------- CONTEXT BUILDER ----------------
 
 def prepare_context(matches: List[Dict]) -> Tuple[str, List[Dict]]:
     """
@@ -73,13 +73,29 @@ def prepare_context(matches: List[Dict]) -> Tuple[str, List[Dict]]:
 
         # Enforce correct payload shape
         if not isinstance(payload, dict):
-            raise ValueError("Invalid payload type; expected dict")
-
-        text = payload.get("text", "").strip()
-        if not text:
+            print(f"[CONTEXT] Warning: Invalid payload type for match {idx}: {type(payload)}")
             continue
 
-        doc_id = payload.get("doc_id", "Unknown")
+        # Try multiple possible text field names
+        text = (
+            payload.get("text") or 
+            payload.get("original_text") or 
+            payload.get("content") or 
+            ""
+        ).strip()
+        
+        if not text:
+            print(f"[CONTEXT] Warning: No text in payload for match {idx}. Payload keys: {list(payload.keys())}")
+            continue
+
+        # Try multiple possible ID field names
+        doc_id = (
+            payload.get("doc_id") or 
+            payload.get("source_file") or 
+            payload.get("source") or 
+            "Unknown"
+        )
+        
         chunk_id = payload.get("chunk_id", 0)
 
         context_parts.append(f"[Source {idx}]\n{text}\n")
@@ -93,12 +109,15 @@ def prepare_context(matches: List[Dict]) -> Tuple[str, List[Dict]]:
         })
 
     if not context_parts:
-        raise ValueError("No valid text found in retrieved payloads")
+        print(f"[CONTEXT] ERROR: No valid text found in {len(matches)} matches")
+        print(f"[CONTEXT] First match payload: {matches[0].get('payload') if matches else 'N/A'}")
+        # Return empty instead of raising - let the generation handle it
+        return "", []
 
     return "\n".join(context_parts), citations
 
 
-# ---------------- RESPONSE GENERATION ----------------
+# ---------------- MEMORY BLOCK BUILDER ----------------
 
 def build_memory_block(memory_chunks: List[str]) -> str:
     """
@@ -119,6 +138,8 @@ It may help interpret follow-up questions but MUST NOT be treated as legal fact.
 """
 
 
+# ---------------- RESPONSE GENERATION ----------------
+
 def generate_response(state: GraphState) -> GraphState:
     """
     Generate final response using retrieved context.
@@ -129,8 +150,8 @@ def generate_response(state: GraphState) -> GraphState:
     matches = state.get("matches", [])
     relevant_memory = state.get("relevant_memory", [])
 
-
     if not matches:
+        print("[GENERATION] No matches found - returning fallback response")
         return {
             **state,
             "context": "",
@@ -143,6 +164,19 @@ def generate_response(state: GraphState) -> GraphState:
 
     # Build context
     context, citations = prepare_context(matches)
+
+    # Check if context building failed
+    if not context:
+        print("[GENERATION] Context preparation failed - returning fallback response")
+        return {
+            **state,
+            "context": "",
+            "citations": [],
+            "final_response": (
+                "I found some matches but couldn't extract readable text from them. "
+                "This might be a data formatting issue."
+            )
+        }
 
     memory_block = build_memory_block(relevant_memory)
 
@@ -157,7 +191,6 @@ def generate_response(state: GraphState) -> GraphState:
         "context": combined_context
     })
 
-
     response_text = result.content if hasattr(result, "content") else str(result)
 
     return {
@@ -168,9 +201,10 @@ def generate_response(state: GraphState) -> GraphState:
     }
 
 
-# ---------------- OUTPUT FORMATTER (UNCHANGED) ----------------
+# ---------------- OUTPUT FORMATTER ----------------
 
 def format_response_with_metadata(state: GraphState) -> Dict:
+    """Format the final response with metadata for display."""
     return {
         "query": state.get("query", ""),
         "response": state.get("final_response", ""),

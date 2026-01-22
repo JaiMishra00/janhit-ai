@@ -158,7 +158,7 @@ if __name__ == "__main__":
     "query": "Explain CRISPR...",
     "files": None,
 
-    # 🔥 REQUIRED FOR MEMORY + RETRIEVAL
+    # REQUIRED FOR MEMORY + RETRIEVAL
     "embedder": embedder,
     "qdrant_client": qdrant_client
     })

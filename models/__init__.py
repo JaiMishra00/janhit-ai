@@ -1,12 +1,14 @@
-# models/__init__.py
-"""Data models and state definitions."""
+"""
+Models package initialization.
+"""
 
 from .state import GraphState
-from .schemas import Topic, DecomposedQuery, RetrieverFilter
+from .schemas import Topic, DecomposedQuery, FilterSchema, RetrieverFilter
 
 __all__ = [
     "GraphState",
     "Topic",
     "DecomposedQuery",
+    "FilterSchema",
     "RetrieverFilter"
 ]

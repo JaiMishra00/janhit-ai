@@ -1,10 +1,12 @@
 import time
 import uuid
-from qdrant_client import models
+from qdrant_client import QdrantClient
+from qdrant_client.models import PointStruct  # FIXED: Add missing import
+from config import MEMORY_COLLECTION
 
 
 def store_memory(
-    client,
+    client: QdrantClient,
     embedder,
     session_id: str,
     role: str,
@@ -16,7 +18,7 @@ def store_memory(
     """
     vector = embedder.embed_query(text)
 
-    point = models.PointStruct(
+    point = PointStruct(  # FIXED: Use PointStruct, not models.PointStruct
         id=str(uuid.uuid4()),
         vector=vector,
         payload={
@@ -29,35 +31,38 @@ def store_memory(
     )
 
     client.upsert(
-        collection_name="conversation_memory",
+        collection_name=MEMORY_COLLECTION,
         points=[point]
     )
 
 
 def retrieve_memory(
-    client,
+    client: QdrantClient,
     embedder,
     session_id: str,
     current_query: str,
     top_k: int = 4
 ):
     """
-    Retrieve relevant past conversation turns for a session.
+    Retrieve relevant conversation history from memory.
     """
-    query_vec = embedder.embed_query(current_query)
+    # Embed current query
+    query_embedding = embedder.embed_query(current_query)
 
-    hits = client.search(
-        collection_name="conversation_memory",
-        query_vector=query_vec,
+    # Search memory collection
+    res = client.query_points(
+        collection_name=MEMORY_COLLECTION,
+        query=query_embedding,
         limit=top_k,
-        query_filter=models.Filter(
-            must=[
-                models.FieldCondition(
-                    key="session_id",
-                    match=models.MatchValue(value=session_id)
-                )
-            ]
-        )
+        with_payload=True
     )
 
-    return [hit.payload["text"] for hit in hits]
+    memories = []
+    for p in res.points:
+        payload = p.payload or {}
+        if payload.get("session_id") == session_id:
+            text = payload.get("text")
+            if text:
+                memories.append(text)
+
+    return memories

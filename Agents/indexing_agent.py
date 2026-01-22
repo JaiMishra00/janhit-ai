@@ -1,112 +1,86 @@
 """
-Agent: Document Indexing
-Indexes document chunks into Qdrant vector store.
+Indexing Agent: Stores document chunks with embeddings in Qdrant.
 """
 
-from qdrant_client import QdrantClient, models
+import uuid
+from qdrant_client.models import PointStruct
 from models.state import GraphState
-from config import QDRANT_URL, QDRANT_COLLECTION
-import hashlib
-
-# Initialize Qdrant client
-qdrant = QdrantClient(url=QDRANT_URL)
-
-
-def generate_point_id(doc_id: str, chunk_id: int) -> str:
-    """
-    Generate a valid UUID-style point ID from doc_id and chunk_id.
-    
-    Qdrant requires point IDs to be either:
-    - Unsigned integers
-    - Valid UUIDs
-    
-    Args:
-        doc_id: Document identifier
-        chunk_id: Chunk index
-        
-    Returns:
-        UUID string
-    """
-    # Create a unique string and hash it to get a UUID
-    unique_string = f"{doc_id}::{chunk_id}"
-    hash_object = hashlib.md5(unique_string.encode())
-    hash_hex = hash_object.hexdigest()
-    
-    # Format as UUID (8-4-4-4-12)
-    uuid_str = f"{hash_hex[:8]}-{hash_hex[8:12]}-{hash_hex[12:16]}-{hash_hex[16:20]}-{hash_hex[20:32]}"
-    
-    return uuid_str
+from config import QDRANT_COLLECTION, QDRANT_URL
+from qdrant_client import QdrantClient
 
 
 def index_documents(state: GraphState) -> GraphState:
     """
-    Index document chunks into Qdrant vector store.
+    Index document chunks with embeddings into Qdrant.
     
     State inputs:
         - chunks: List of {"doc_id": str, "chunk_id": int, "text": str}
         - chunk_embeddings: List of embedding vectors
-        
-    State outputs:
-        - (No new state fields, but chunks are indexed in Qdrant)
+        - qdrant_client: Qdrant client instance
         
     Returns:
-        Updated state (unchanged, indexing is a side effect)
+        Updated state (no new fields added)
     """
     
     chunks = state.get("chunks", [])
     embeddings = state.get("chunk_embeddings", [])
+    client = state.get("qdrant_client")
     
     print(f"[INDEXING] Processing {len(chunks)} chunks with {len(embeddings)} embeddings")
     
-    # Skip if no chunks or embeddings
     if not chunks or not embeddings:
         print("[INDEXING] No chunks or embeddings to index, skipping")
         return state
     
     if len(chunks) != len(embeddings):
-        print(f"[INDEXING] WARNING: Mismatch between chunks ({len(chunks)}) and embeddings ({len(embeddings)})")
+        print(f"[INDEXING] ERROR: Mismatch - {len(chunks)} chunks but {len(embeddings)} embeddings")
+        return state
+    
+    if not client:
+        print("[INDEXING] ERROR: No Qdrant client provided")
         return state
     
     # Prepare points for Qdrant
     points = []
-    
     for chunk, embedding in zip(chunks, embeddings):
-        doc_id = chunk["doc_id"]
-        chunk_id = chunk["chunk_id"]
-        text = chunk["text"]
+        point_id = str(uuid.uuid4())
         
-        # Generate valid point ID
-        point_id = generate_point_id(doc_id, chunk_id)
+        # Create payload that matches your existing schema
+        # Use BOTH field names for compatibility
+        payload = {
+            # New schema fields (for new documents)
+            "text": chunk["text"],
+            "doc_id": chunk["doc_id"],
+            "chunk_id": chunk["chunk_id"],
+            
+            # Old schema fields (for compatibility with existing data)
+            "original_text": chunk["text"],
+            "source_file": chunk["doc_id"],
+            
+            # Optional metadata (you can customize these)
+            "type": "text",
+            "doc_type": "User Upload",
+            "category": "General",
+            "jurisdiction": "Unknown",
+            "authority": "User Provided"
+        }
         
-        # Create point
-        point = models.PointStruct(
+        point = PointStruct(
             id=point_id,
             vector=embedding,
-            payload={
-            "doc_id": doc_id,
-            "chunk_id": chunk_id,
-            "text": text,
-            "doc_type": state.get("document_profile", {}).get("doc_type"),
-            "category": state.get("document_profile", {}).get("category"),
-            "jurisdiction": state.get("document_profile", {}).get("jurisdiction"),
-}
+            payload=payload
         )
-        
         points.append(point)
     
     # Upsert to Qdrant
     try:
-        print(f"[INDEXING] Upserting {len(points)} points to collection '{QDRANT_COLLECTION}'")
-        
-        qdrant.upsert(
+        client.upsert(
             collection_name=QDRANT_COLLECTION,
             points=points
         )
-        
-        print(f"[INDEXING] Successfully indexed {len(points)} chunks")
-        
+        print(f"[INDEXING] Successfully indexed {len(points)} chunks to {QDRANT_COLLECTION}")
     except Exception as e:
-        print(f"[INDEXING] Error indexing documents: {e}")
+        print(f"[INDEXING] ERROR: Failed to index documents: {e}")
         import traceback
         traceback.print_exc()
     
