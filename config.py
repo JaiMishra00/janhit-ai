@@ -21,6 +21,13 @@ QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
 QDRANT_COLLECTION = "md_bge_m3_source"
 MEMORY_COLLECTION = "conversation_memory"
 
+# API Based
+# QDRANT_URL = os.getenv("QDRANT_URL")          
+# QDRANT_API_KEY = os.getenv("QDRANT_API_KEY") 
+
+# QDRANT_COLLECTION = "md_bge_m3_source"
+# MEMORY_COLLECTION = "conversation_memory"
+
 # ========== TESSERACT ==========
 # Set this path if Tesseract is not in system PATH
 TESSERACT_CMD = os.getenv(
