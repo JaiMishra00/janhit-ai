@@ -1,5 +1,5 @@
 # Janhit AI — Legal RAG with Memory
-## This was made for Convolve 4.0 Hackathon
+## This was made for Convolve 4.0 Hackathon (refer to setup.txt for setup)
 
 ## Problem
 
