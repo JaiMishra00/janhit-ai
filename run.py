@@ -1,12 +1,12 @@
 """
 Entry point for running the multi-agent RAG system.
+Includes response generation with citations.
 """
 
 from graph import app
+from Agents.generation_agent import format_response_with_metadata
 from pprint import pprint
 import sys
-
-sys.stdout.reconfigure(encoding="utf-8")
 
 
 
@@ -29,11 +29,13 @@ def run_query(query: str, files: list = None):
         print(f"FILES: {files}")
         print("-" * 80)
     
-    # Invoke the graph
-    result = app.invoke({
+    # Invoke the graph with dict (LangGraph expects dict, not TypedDict instance)
+    initial_state = {
         "query": query,
         "files": files
-    })
+    }
+
+    result = app.invoke(initial_state)
     
     # Display results
     print("\nPIPELINE RESULTS")
@@ -44,6 +46,7 @@ def run_query(query: str, files: list = None):
     print(f"Query embeddings: {len(result.get('query_embeddings', []))}")
     print(f"Chunk embeddings: {len(result.get('chunk_embeddings', []))}")
     print(f"Retrieved matches: {len(result.get('matches', []))}")
+    print(f"Citations generated: {len(result.get('citations', []))}")
     
     # Show decomposed questions
     if result.get("standalone_questions"):
@@ -56,19 +59,35 @@ def run_query(query: str, files: list = None):
     if result.get("filters"):
         print("\nFILTERS")
         print("-" * 80)
-        pprint(result["filters"])
+        print(result["filters"])
     
-    # Show top matches
-    if result.get("matches"):
-        print("\nTOP MATCHES")
+    # Show generated response
+    if result.get("final_response"):
+        print("\n" + "=" * 80)
+        print("GENERATED RESPONSE")
+        print("=" * 80)
+        print(result["final_response"])
+        print("=" * 80)
+    else:
+        print("\nWARNING: No final_response in result!")
+        print(f"Available keys: {list(result.keys())}")
+    
+    # Show citations
+    if result.get("citations"):
+        print("\nCITATIONS")
         print("-" * 80)
-        for i, match in enumerate(result["matches"][:5], 1):
-            score = match["score"]
-            score_str = f"{score:.4f}" if score is not None else "N/A"
-            print(f"\n{i}. Score: {score_str}")
-            print(f"   ID: {match['id']}")
-            if match.get("payload"):
-                print(f"   Metadata: {match['payload']}")
+        for citation in result["citations"]:
+            print(f"\n[Source {citation['source_number']}]")
+            print(f"  Document: {citation['doc_id']}")
+            print(f"  Chunk ID: {citation['chunk_id']}")
+            score = citation.get("score")
+            if score is not None:
+                print(f"  Relevance Score: {score:.4f}")
+            else:
+                print("  Relevance Score: N/A")
+
+            if citation.get('text_preview'):
+                print(f"  Preview: {citation['text_preview'][:100]}...")
     
     print("\n" + "=" * 80)
     
@@ -81,7 +100,7 @@ def main():
     # Example 1: Text-only query
     print("\nEXAMPLE 1: Text-only query (no files)\n")
     run_query(
-        query="Who is an agriculturist according to GST acts",
+        query="what is an agriculturist in gst act?",
         files=None
     )
     
@@ -95,7 +114,7 @@ def main():
     # Example 3: Domain-specific query with filters
     print("\nEXAMPLE 3: Domain-specific query\n")
     run_query(
-        query="Find regulations about data privacy enacted in California after 2020",
+        query="how to lodge a FIR complain?",
         files=None
     )
 

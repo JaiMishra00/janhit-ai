@@ -18,44 +18,47 @@ llm = ChatOpenAI(
     temperature=0.3  # Slightly higher for more natural responses
 )
 
-# Response generation prompt
+# Response generation prompt - LESS STRICT VERSION
 generation_prompt = ChatPromptTemplate.from_messages([
     ("system", """
-You are an expert assistant that provides actionable, well-cited responses.
+You are a helpful legal and policy assistant that provides clear, actionable answers based on available information.
 
-CRITICAL RULES:
-1. Use ONLY the provided context to answer, If the context contains statutory text, you MAY extract and summarize a definition
-even if it is not stated in a single sentence.
-2. Cite sources using [Source X] notation after each claim
-3. Make responses actionable - tell users what they CAN DO
-4. Explain what legal/policy frameworks ENABLE them to do it
-5. Be specific and concrete
-6. If context is insufficient, say so clearly
-7. Structure response with:
-   - Direct answer
-   - Actionable steps (if applicable)
-   - Legal/policy basis (what enables this)
-   - Relevant citations
+YOUR TASK:
+Answer the user's question using the provided context. Be thorough and helpful.
 
-CITATION FORMAT:
-- Use [Source 1], [Source 2], etc. for each referenced chunk
-- Place citation immediately after the claim
-- At the end, list all sources with their metadata
+GUIDELINES:
+1. Use the provided context as your primary source
+2. Cite sources using [Source X] notation when referencing specific information
+3. If the context contains relevant information, use it to construct your answer
+4. Provide actionable guidance when applicable
+5. If the context is incomplete, answer what you can and note what's missing
+6. Structure your response clearly with sections if needed
+
+CITATION RULES:
+- Add [Source 1], [Source 2], etc. after claims drawn from the context
+- You don't need to cite every sentence - focus on key facts and specific claims
+- At the end, you may list sources with their metadata
+
+RESPONSE STYLE:
+- Be conversational but professional
+- Provide direct answers first, then elaborate
+- Include practical steps or implications when relevant
+- Explain what legal/policy frameworks enable actions, if applicable
 
 Example response:
-"You can request data deletion under GDPR Article 17 [Source 1]. To exercise this right, 
-submit a written request to the data controller within their specified timeframe [Source 2].
+"An agriculturist under GST Act refers to an individual or entity engaged in agricultural activities [Source 1]. This typically includes cultivation of crops, rearing of livestock, and related farming operations.
 
-What enables you to do this:
-- GDPR Article 17 grants the 'right to be forgotten' [Source 1]
-- Organizations must respond within 30 days [Source 3]
+The GST framework provides certain exemptions for agriculturists, particularly for the supply of agricultural produce [Source 2]. This means that if you're selling farm produce directly, you may not need to register for GST in many cases.
+
+What this enables:
+- Small farmers can sell produce without GST registration burden
+- Agricultural cooperatives receive preferential treatment under the act
 
 Sources:
-[Source 1] GDPR Article 17 (doc_id: gdpr_regulation.pdf, score: 0.92)
-[Source 2] Data Protection Guidelines (doc_id: dp_guidelines.pdf, score: 0.88)
-[Source 3] Compliance Manual (doc_id: compliance.pdf, score: 0.85)"
+[Source 1] GST Act Section 2(7) - Definition of agriculturist
+[Source 2] GST Exemption Notification - Agricultural supplies"
 
-Context will be provided with numbered sources.
+Now answer the user's question using the provided context.
 """),
     ("human", """
 Query: {query}
@@ -63,7 +66,7 @@ Query: {query}
 Context:
 {context}
 
-Generate a comprehensive, actionable response with proper citations.""")
+Provide a comprehensive answer based on the context above.""")
 ])
 
 
@@ -83,42 +86,64 @@ def prepare_context(matches: List[Dict]) -> tuple[str, List[Dict]]:
     context_parts = []
     citations = []
     
+    print(f"[CONTEXT] Preparing context from {len(matches)} matches")
+    
     for idx, match in enumerate(matches, 1):
-
-        # -------- normalize match --------
-        if hasattr(match, "payload"):          # ScoredPoint
-            payload = match.payload
-            score = match.score
-        else:                                   # dict
+        print(f"[CONTEXT] Match {idx} type: {type(match)}")
+        print(f"[CONTEXT] Match {idx} keys: {match.keys() if isinstance(match, dict) else 'N/A'}")
+        
+        # Normalize match structure - handle dict format from retrieval_agent
+        if isinstance(match, dict):
             payload = match.get("payload", {})
             score = match.get("score", 0.0)
+            print(f"[CONTEXT] Dict match - payload type: {type(payload)}")
+        elif hasattr(match, "payload"):  # ScoredPoint object
+            payload = match.payload
+            score = match.score
+            print(f"[CONTEXT] Object match - payload: {payload}")
+        else:
+            print(f"[CONTEXT] Unknown match format, skipping")
+            continue
 
-        # -------- normalize payload --------
-        payload_items = payload if isinstance(payload, list) else [payload]
+        # Extract text from payload
+        text = ""
+        doc_id = "Unknown"
+        chunk_id = 0
+        
+        if isinstance(payload, dict):
+            text = payload.get("text", "")
+            doc_id = payload.get("doc_id", "Unknown")
+            chunk_id = payload.get("chunk_id", 0)
+        elif hasattr(payload, "get"):
+            text = payload.get("text", "")
+            doc_id = payload.get("doc_id", "Unknown")
+            chunk_id = payload.get("chunk_id", 0)
+        elif hasattr(payload, "text"):
+            text = payload.text
+            doc_id = getattr(payload, "doc_id", "Unknown")
+            chunk_id = getattr(payload, "chunk_id", 0)
+        else:
+            print(f"[CONTEXT] Cannot extract text from payload type: {type(payload)}")
+            continue
 
-        for item in payload_items:
+        print(f"[CONTEXT] Extracted - doc_id: {doc_id}, chunk_id: {chunk_id}, text_len: {len(text)}")
 
-            # item can still be ScoredPoint (yes, Qdrant allows nested)
-            if hasattr(item, "payload"):
-                text = item.payload.get("text", "")
-                meta = item.payload
-            else:
-                text = item.get("text", "")
-                meta = item
-
+        if text:
             context_parts.append(f"[Source {idx}]\n{text}\n")
-
+            
             citations.append({
                 "source_number": idx,
-                "doc_id": meta.get("doc_id", "Unknown"),
-                "chunk_id": meta.get("chunk_id", 0),
+                "doc_id": doc_id,
+                "chunk_id": chunk_id,
                 "score": score if score is not None else 0.0,
                 "text_preview": text[:200]
             })
-
-
+        else:
+            print(f"[CONTEXT] WARNING: Empty text for match {idx}")
     
     context_string = "\n".join(context_parts)
+    print(f"[CONTEXT] Final context: {len(context_string)} chars, {len(citations)} citations")
+    
     return context_string, citations
 
 
@@ -139,11 +164,9 @@ def generate_response(state: GraphState) -> GraphState:
         Updated state with generated response
     """
     
-    print(type(state))
-
     matches = state.get("matches", [])
-    assert isinstance(matches, list)
-
+    
+    print(f"[GENERATION] Processing {len(matches)} matches")
     
     # Handle case with no matches
     if not matches:
@@ -153,12 +176,19 @@ def generate_response(state: GraphState) -> GraphState:
             "citations": [],
             "final_response": (
                 "I couldn't find relevant information in the knowledge base to answer your question. "
-                "Please try rephrasing your query or provide more specific details."
+                "This might mean:\n"
+                "- The information isn't in the current database\n"
+                "- The query needs to be rephrased\n"
+                "- More specific details would help narrow the search\n\n"
+                "Please try rephrasing your query or provide more context."
             )
         }
     
     # Prepare context and citations
     context, citations = prepare_context(matches)
+    
+    print(f"[GENERATION] Context length: {len(context)} chars")
+    print(f"[GENERATION] Citations prepared: {len(citations)}")
     
     # Generate response
     try:
@@ -171,23 +201,33 @@ def generate_response(state: GraphState) -> GraphState:
         # Extract text from response
         response_text = result.content if hasattr(result, 'content') else str(result)
         
-        return {
-        **state,
-        "context": context,
-        "citations": citations,
-        "final_response": response_text
+        print(f"[GENERATION] Response generated: {len(response_text)} chars")
+        print(f"[GENERATION] Response preview:\n{response_text[:500]}...\n")
+        
+        updated_state = {
+            **state,
+            "context": context,
+            "citations": citations,
+            "final_response": response_text
         }
-
+        
+        print(f"[GENERATION] State updated - final_response key present: {'final_response' in updated_state}")
+        print(f"[GENERATION] Citations count in state: {len(updated_state.get('citations', []))}")
+        
+        return updated_state
         
     except Exception as e:
-        print(f"Error generating response: {e}")
+        print(f"[GENERATION] Error generating response: {e}")
+        import traceback
+        traceback.print_exc()
+        
         return {
             **state,
             "context": context,
             "citations": citations,
             "final_response": (
                 f"An error occurred while generating the response: {str(e)}\n\n"
-                f"However, here are the relevant sources found:\n{context}"
+                f"However, I found {len(citations)} relevant sources. Here's the context:\n\n{context[:500]}..."
             )
         }
 

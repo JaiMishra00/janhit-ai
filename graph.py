@@ -10,6 +10,7 @@ Flow:
 6. Embed document chunks
 7. Generate metadata filters
 8. Retrieve and rank relevant chunks
+9. Generate actionable response with citations
 """
 
 from langgraph.graph import StateGraph, END
@@ -30,6 +31,11 @@ from Agents.retrieval_agent import (
     generate_filters,
     retrieve_and_rank
 )
+from Agents.generation_agent import (
+    generate_response,
+    format_response_with_metadata
+)
+from Agents.indexing_agent import index_documents
 
 
 def create_graph():
@@ -57,6 +63,13 @@ def create_graph():
     # Retrieval nodes
     graph.add_node("generate_filters", generate_filters)
     graph.add_node("retrieve_and_rank", retrieve_and_rank)
+    
+    # Generation node
+    graph.add_node("generate_response", generate_response)
+
+    # Indexing node
+    graph.add_node("index_documents", index_documents)
+
     
     # ========== CONFIGURE ROUTING ==========
     
@@ -89,17 +102,26 @@ def create_graph():
     graph.add_edge("embed_queries", "embed_documents")
     
     # Document embedding → Filter generation
-    graph.add_edge("embed_documents", "generate_filters")
+    graph.add_edge("embed_documents", "index_documents")
+    graph.add_edge("index_documents", "generate_filters")
+
     
     # Filter generation → Retrieval
     graph.add_edge("generate_filters", "retrieve_and_rank")
     
+    # Retrieval → Response generation
+    graph.add_edge("retrieve_and_rank", "generate_response")
+    
     # ========== EXIT POINT ==========
     
-    graph.add_edge("retrieve_and_rank", END)
+    graph.add_edge("generate_response", END)
+    compiled = graph.compile()
+    print(compiled.get_graph().draw_mermaid())
+
     
     # Compile graph
     return graph.compile()
+
 
 
 # Create singleton graph instance
@@ -112,7 +134,7 @@ if __name__ == "__main__":
     
     # Test 1: Text-only query (no files)
     print("=" * 60)
-    print("TEST 1: Text-only query")
+    print("TEST 1: Text-only query with response generation")
     print("=" * 60)
     
     result = app.invoke({
@@ -125,30 +147,52 @@ if __name__ == "__main__":
     print(f"Chunks: {len(result.get('chunks', []))}")
     print(f"Query embeddings: {len(result.get('query_embeddings', []))}")
     print(f"Matches: {len(result.get('matches', []))}")
+    print(f"Citations: {len(result.get('citations', []))}")
     
     if result.get("standalone_questions"):
         print("\nDecomposed questions:")
         for q in result["standalone_questions"]:
             print(f"  - {q}")
     
+    if result.get("final_response"):
+        print("\n" + "=" * 60)
+        print("GENERATED RESPONSE:")
+        print("=" * 60)
+        print(result["final_response"])
+    
+    if result.get("citations"):
+        print("\n" + "=" * 60)
+        print("CITATIONS:")
+        print("=" * 60)
+        for citation in result["citations"]:
+            print(f"\n[Source {citation['source_number']}]")
+            print(f"  Document: {citation['doc_id']}")
+            print(f"  Chunk: {citation['chunk_id']}")
+            print(f"  Relevance: {citation['score']:.4f}")
+    
     # Test 2: Query with files
     print("\n" + "=" * 60)
-    print("TEST 2: Query with files")
+    print("TEST 2: Query with files and full pipeline")
     print("=" * 60)
     
     result = app.invoke({
-        "query": "Summarize the legal document",
+        "query": "What are the key legal provisions in this document?",
         "files": ["sample.pdf"]  # Replace with actual file path
     })
     
     print(f"Documents extracted: {len(result.get('documents', []))}")
     print(f"Total chunks: {len(result.get('chunks', []))}")
-    print(f"Query embeddings: {len(result.get('query_embeddings', []))}")
-    print(f"Chunk embeddings: {len(result.get('chunk_embeddings', []))}")
     print(f"Retrieved matches: {len(result.get('matches', []))}")
     
-    if result.get("matches"):
-        print("\nTop matches:")
-        for i, match in enumerate(result["matches"][:3], 1):
-            print(f"  {i}. Score: {match['score']:.4f}")
-            print(f"     ID: {match['id']}")
+    if result.get("final_response"):
+        print("\n" + "=" * 60)
+        print("GENERATED RESPONSE:")
+        print("=" * 60)
+        pprint(result["final_response"])
+    
+    # Format and display complete output
+    formatted = format_response_with_metadata(result)
+    print("\n" + "=" * 60)
+    print("FORMATTED OUTPUT:")
+    print("=" * 60)
+    pprint(formatted, width=300)
