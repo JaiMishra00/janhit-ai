@@ -100,6 +100,25 @@ def prepare_context(matches: List[Dict]) -> Tuple[str, List[Dict]]:
 
 # ---------------- RESPONSE GENERATION ----------------
 
+def build_memory_block(memory_chunks: List[str]) -> str:
+    """
+    Formats conversational memory for prompt injection.
+    Memory is for conversational continuity only and is NOT authoritative.
+    """
+    if not memory_chunks:
+        return ""
+
+    formatted = "\n".join(f"- {m}" for m in memory_chunks)
+
+    return f"""
+Conversation Context (for continuity only):
+The following reflects earlier parts of this conversation.
+It may help interpret follow-up questions but MUST NOT be treated as legal fact.
+
+{formatted}
+"""
+
+
 def generate_response(state: GraphState) -> GraphState:
     """
     Generate final response using retrieved context.
@@ -108,6 +127,8 @@ def generate_response(state: GraphState) -> GraphState:
     print("[GENERATION] generate_response HIT")
 
     matches = state.get("matches", [])
+    relevant_memory = state.get("relevant_memory", [])
+
 
     if not matches:
         return {
@@ -123,11 +144,19 @@ def generate_response(state: GraphState) -> GraphState:
     # Build context
     context, citations = prepare_context(matches)
 
+    memory_block = build_memory_block(relevant_memory)
+
+    combined_context = (
+        memory_block + "\n\n" + context
+        if memory_block else context
+    )
+
     chain = generation_prompt | llm
     result = chain.invoke({
         "query": state["query"],
-        "context": context
+        "context": combined_context
     })
+
 
     response_text = result.content if hasattr(result, "content") else str(result)
 

@@ -27,3 +27,11 @@ class GraphState(TypedDict, total=False):
     context: str
     citations: List[Dict]
     final_response: str
+
+    user_query: str
+    retrieved_docs: List[dict]
+    final_answer: str
+
+    # 🔥 conversational memory
+    session_id: str
+    relevant_memory: List[str]

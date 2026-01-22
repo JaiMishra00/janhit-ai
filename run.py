@@ -7,6 +7,11 @@ from graph import app
 from Agents.generation_agent import format_response_with_metadata
 from pprint import pprint
 import sys
+import uuid
+
+# One session per CLI run
+SESSION_ID = str(uuid.uuid4())
+print(f"\n[Session Started] session_id = {SESSION_ID}\n")
 
 
 
@@ -31,9 +36,11 @@ def run_query(query: str, files: list = None):
     
     # Invoke the graph with dict (LangGraph expects dict, not TypedDict instance)
     initial_state = {
-        "query": query,
-        "files": files
-    }
+    "query": query,
+    "files": files,
+    "session_id": SESSION_ID   # 🔥 THIS IS STEP 3
+}
+
 
     result = app.invoke(initial_state)
     
