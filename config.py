@@ -4,7 +4,9 @@ Configuration for LLM, embeddings, and vector store.
 
 import os
 
-# ========== LM STUDIO ==========
+# ========== LM STUDIO ========== 
+
+# Comment this if running using APIs
 LMSTUDIO_BASE_URL = os.getenv("LMSTUDIO_URL", "http://127.0.0.1:1234/v1")
 LMSTUDIO_MODEL = "meta-llama-3.1-8b-instruct"
 EMBEDDING_MODEL = "text-embedding-bge-m3"
